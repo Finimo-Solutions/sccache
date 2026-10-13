@@ -384,7 +384,17 @@ impl LruDiskCache {
             .ok_or(Error::FileNotInCache)
             .and_then(|_| {
                 let t = FileTime::now();
-                set_file_times(&path, t, t)?;
+                // The touch only feeds LRU eviction. On a cache mounted read-only (a shared
+                // cache that only a trusted writer may fill) it fails, and the hit must still
+                // be served instead of being turned into a cache error.
+                if let Err(e) = set_file_times(&path, t, t) {
+                    if !matches!(
+                        e.kind(),
+                        io::ErrorKind::ReadOnlyFilesystem | io::ErrorKind::PermissionDenied
+                    ) {
+                        return Err(e.into());
+                    }
+                }
                 File::open(path).map_err(Into::into)
             })
     }
